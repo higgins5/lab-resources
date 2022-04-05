@@ -1,0 +1,306 @@
+---
+title: "CooksD Functions"
+output:
+  html_document:
+    code_folding: show
+    toc: yes
+    toc_float:
+      collapsed: no
+      smooth_scroll: no
+      
+---
+
+<br><br><br><br>
+Reference: Kutner, M., Nachtsheim, C., Neter, J., & Li, W. (2005). Applied linear statistical models (5th ed.). Boston: McGraw-Hill Irwin.  
+
+- Specifically, p. 403: _"For interpreting Cook's distance measure, it has been found useful to relate Di to the F(p, n - p) distribution and ascertain the corresponding percentile value. If the percentile value is less than about 10 or 20 percent, the i th case has little app~t influence on the fitted values. If, on the other hand, the percentile value is near 50 percent or more, the fitted values obtained with and without the i th case should be considered to differ substantially, implying that the ith case has a major influence on the fit of the regression function"_  
+- Orig Cook's Distance reference: Cook, R. D., & Weisberg, S. (1982). Residuals and influence in regression. New York: Chapman and Hall.
+<br><br><br><br>
+
+# Load packages
+```{r, warning=FALSE, message=FALSE}
+library(tidyverse)
+library(knitr)
+```
+
+## Estelle's Original Function
+- Inputs for the function will be, for whatever your linear model is looking at 
+  - lm.mod.formula <- "DV~IV and covariates"
+  - dat.2stage <- dataframe with your data
+```{r} 
+cooks.distance.comparison <- function(lm.mod.formula, dat.2stage){
+  lm1 = lm(lm.mod.formula, dat.2stage)
+  par(mfrow = c(2,2))
+  plot(lm1)
+  
+  # Cook's Distance Summary 
+  lm1_cook <- cooks.distance(lm1)
+  lm1_cook.sum <- matrix(summary(lm1_cook), 
+                         ncol=6,
+                         dimnames = list(c("Cook's D"), 
+                                         c("Min.", "1st Qu.", 
+                                           "Median", "Mean", 
+                                           "3rd Qu.", "Max")))
+  
+  # parameters and numobs to use as DoF
+  p <- length(coef(lm1))  #number of parameters
+  n.mod <- dim(lm1$model)[1] # number of observations
+  n_p <- n.mod-p # parameters minus observations 
+
+  # Table of summary stats for cook's D for this model
+  tabcook <- as.table(lm1_cook.sum)
+
+  cat("=============================  \ncook's d summary stats")
+  print(kable(tabcook, "simple"))
+  
+  cat("\nMean Cook's D = ")
+  cat(c(lm1_cook.sum[4], "  \n"))
+  cat("\nTotal N = ")
+  cat(c(dim(lm1$model)[1], "  \n"))
+  
+  cat("\n4/n threshold = ")
+  cat(c(4/dim(lm1$model)[1], "  \n"))
+  
+  cat("\n3*mean threshold = ")
+  cat(c(3*mean(lm1_cook), "  \n"))
+  
+  cat("\nF-Dist 50% = ")
+  cat(c(qf(0.5, p, n_p), "  \n"))
+
+  # Identify outliers based on cook's d > 3*mean
+  lm1_cook.Out <- lm1_cook > (3*mean(lm1_cook))
+  cook.rows <- as.numeric(names(lm1_cook.Out)[lm1_cook.Out == TRUE])
+  cook.sub <- dat.2stage$id[cook.rows]
+  
+  # this makes a dataframe of whichever variables you need, only choosing rows that are identified as above the cook's d threshold specified ([cook.rows])
+  # here, you won't need numobs or int.est or slope.est, but would want to grab whichever variables are included and of interest the particular analysis (e.g., dataframe$age[cook.rows])
+  cook.threeXmean <- data.frame("ID" = cook.sub, 
+                              #"numobs" = dat.2stage$numobsS[cook.rows], 
+                              #"int.est" = dat.2stage$int.estS[cook.rows], 
+                              #"slope.est" = dat.2stage$slope.estS[cook.rows], 
+                              "cooks.d" = lm1_cook[lm1_cook.Out])
+  
+  
+  # Identify outliers based on cook's d > 4/N
+  n.mod <- dim(lm1$model)[1]
+  lm1_cook.4n <- lm1_cook > 4/n.mod
+  cook.rows.4n <- as.numeric(names(lm1_cook.4n)[lm1_cook.4n==TRUE])
+  cook.sub.4n <- dat.2stage$id[cook.rows.4n]
+  
+  cook.4N <- data.frame("ID" = cook.sub.4n, 
+                             #"numobs" = dat.2stage$numobsS[cook.rows.4n], 
+                              #"int.est" = dat.2stage$int.estS[cook.rows.4n], 
+                              #"slope.est" = dat.2stage$slope.estS[cook.rows.4n], 
+                              "cooks.d" = lm1_cook[lm1_cook.4n])
+  
+  # Identify outliers based on cook's d F-distribution percentile ≥ 50%, with p and n-p d.o.f
+  f.dist.med <- qf(0.5, p, n_p) #this tells us the 50th percentile of the F-dist with p, n-p d.o.f == cutoff point
+  lm1_cook.f <- lm1_cook > f.dist.med
+  cook.rows.f <- as.numeric(names(lm1_cook.f)[lm1_cook.f==T])
+  cook.sub.f <- dat.2stage$id[cook.rows.f]
+  
+  cook.fdist <- data.frame("ID" = cook.sub.f,
+                           #"numobs" = dat.2stage$numobsS[cook.rows.f],
+                           #"int.est" = dat.2stage$int.estS[cook.rows.f],
+                           #"slope.est" = dat.2stage$slope.estS[cook.rows.f],
+                           "cooks.d" = lm1_cook[lm1_cook.f])
+  
+  # Identify outliers based on cook's d F-distribution percentile > 20% p and n-p d.o.f
+  f.dist.med1 <- qf(0.2, p, n_p)
+  lm1_cook.f1 <- lm1_cook > f.dist.med1
+  cook.rows.f1 <- as.numeric(names(lm1_cook.f1)[lm1_cook.f1==T])
+  cook.sub.f1 <- dat.2stage$id[cook.rows.f1]
+  
+  cook.fdist1 <- data.frame("ID" = cook.sub.f1,
+                            #"numobs" = dat.2stage$numobsS[cook.rows.f1],
+                            #"int.est" = dat.2stage$int.estS[cook.rows.f1],
+                            #"slope.est" = dat.2stage$slope.estS[cook.rows.f1],
+                            "cooks.d" = lm1_cook[lm1_cook.f1])
+  
+  # plot cook's d with horizontal lines for each threshold
+  cols <- c("4/N" = "#3C5488B2", "3*mean" = "#00A087B2", "f-dist > 50%" = "#E64B35B2", "f-dist > 20%" = "#EFC000FF")
+  compareplot <- ggplot(lm1, aes(as.numeric(names(cooks.distance(lm1))), cooks.distance(lm1))) + 
+    geom_point() + 
+    geom_hline(aes(yintercept = (4/n.mod), color = "4/N")) + 
+    geom_hline(aes(yintercept = (3*mean(lm1_cook)), color = "3*mean")) + 
+    geom_hline(aes(yintercept = f.dist.med, color ="f-dist > 50%")) +
+    geom_hline(aes(yintercept = f.dist.med1, color="f-dist > 20%")) + 
+    scale_color_manual(name = "threshold", values = cols) + 
+    theme(axis.title.x = element_blank()) + labs(title = "Cook's D Threshold Comparison")
+  print(compareplot)
+  
+  # tables for comparison 
+  knitr::kables(
+    list(knitr::kable(cook.threeXmean, "markdown", caption = "cooks d > 3*mean"),
+         knitr::kable(cook.4N, "markdown", caption = "cook's d > 4/N"), "  \n",
+         knitr::kable(cook.fdist, "markdown", caption = "f dist > 50%"),
+         knitr::kable(cook.fdist1, "markdown", caption = "f dist > 20%")))
+
+}
+```
+
+
+# Ajay's adaptation / functions
+- I haven't really explored this completely but it could be helpful to look into because I think it will be more generalizable (maybe email him to clarify what the inputs for each function would be?)
+```{r}
+###############################################################################
+# Check influential outliers based on Cook's distance and different thresholds
+# Created by Ajay, November 3, 2020
+# Adapted from Estelle's code
+###############################################################################
+
+library(tidyverse) 
+library(knitr)
+
+print_header <- function(...){
+  cat('\n----------------------------------------------------------------------\n')
+  cat(...)
+  cat('\n----------------------------------------------------------------------\n')
+}
+
+print_text <- function(...){
+  cat('\n')
+  cat(...)
+  cat('\n')
+}
+
+rounder <- function(num){
+  round(num, 4)
+}
+
+
+get_num_influentials <- function(cooks, threshold){
+  
+  length(which(cooks > threshold))
+}
+
+print_influentials <- function(cooks, threshold, data){
+  
+  print_text('Influential outlier threshold: ', threshold)
+  inf.out <- cooks > threshold
+  
+  # How many data points?
+  total <- nrow(data)
+  
+  # How many influentials?
+  num.influentials <- length(which(inf.out))
+  percent.influentials <- round((num.influentials/total)*100, 2)
+  print_text('Number of influentials: ', num.influentials, '  (', percent.influentials, '%)')   
+  
+  if(num.influentials > 0) {
+    # Which are the influential ids?
+    inf.rows <- as.numeric(names(inf.out)[inf.out])
+    inf.ids <- as.character(data$ADRCNo[inf.rows])
+    
+    print_text('Influentials IDs: ')
+    print_text(inf.ids)  
+    
+    # Summary of Influential values
+    print_text('Summary of influentials values: ')
+    print(summary(cooks[inf.out]))
+  }
+  
+  # Return number of influentials
+  num.influentials
+}
+
+get_clean <- function(cooks, threshold, modeldata){
+  inf.out <- cooks > threshold
+  cleaned <- modeldata[!inf.out, ]
+  cleaned
+}
+
+remove_influentials<- function(model, data){
+
+  # Get data used in the model after removing NAs
+  data.mod <- model$model
+  
+  # Model diagnostics
+  par(mfrow = c(2,2))
+  plot(model)
+  
+  # Cook's Distance 
+  model.cook <- cooks.distance(model)
+  model.cook.summary <- matrix(rounder(summary(model.cook)), 
+                         ncol=6,
+                         dimnames = list(c("Cook's D"), 
+                                         c("Min", "Q1", "Median", "Mean", "Q3", "Max")))
+  # parameters and num observations
+  n.mod <- nrow(data.mod)
+  p <- length(coef(model))
+  n_p <- n.mod-p
+  
+  # Get thresholds
+  three.mean <- rounder(3*mean(model.cook))
+  four.by.n <- rounder(4/n.mod)
+  q.1 <- rounder(qf(0.1, p, n_p))
+  q.2 <- rounder(qf(0.2, p, n_p))
+  
+  # Table of summary stats for cook's D
+  tabcook <- as.table(model.cook.summary)
+  
+  print_header("Cook's D summary stats")
+  print(kable(tabcook, "simple"))
+  
+  print_text('N: ', n.mod)
+  print_text('4/n threshold: ', four.by.n)
+  print_text('3*Mean threshold: ', three.mean)
+  print_text('F-Dist 20% = ', q.2)
+  print_text('F-Dist 10% = ', q.1)
+  
+  
+  print_header("Influentials by Cook's D, 4/n threshold")
+  print_influentials(model.cook, four.by.n, data)
+  
+  print_header("Influentials by Cook's D, 3*mean threshold")
+  print_influentials(model.cook, three.mean, data)
+  
+  print_header("Influentials by Cook's D, 20% of F Dist threshold")
+  print_influentials(model.cook, q.2, data)
+  
+  print_header("Influentials by Cook's D, 10% of F Dist threshold")
+  print_influentials(model.cook, q.1, data)
+
+  # Plot cook's d with horizontal lines for each threshold
+  colors <- c("4/N" = "#3C5488B2", "3*mean" = "#00A087B2", "f-dist > 20%" = "#E64B35B2", "f-dist > 10%" = "#EFC000FF")
+  compareplot <- ggplot(model, aes(x = as.numeric(names(model.cook)), y = model.cook)) + 
+    geom_point() + 
+    geom_hline(aes(yintercept = four.by.n, color = "4/N")) + 
+    geom_hline(aes(yintercept = three.mean, color = "3*mean")) + 
+    geom_hline(aes(yintercept = q.2, color ="f-dist > 20%")) +
+    geom_hline(aes(yintercept = q.1, color="f-dist > 10%")) + 
+    scale_color_manual(name = "threshold", values = colors) + 
+    theme(axis.title.x = element_blank()) + 
+    labs(title = "Cook's D Threshold Comparison",
+         y = "Cook's distance")
+  print(compareplot)
+  
+  
+  # Finalized threshold
+  print_header('Using 10% of F Distribution (', q.1, ') as final threshold')
+  final.threshold <- q.1
+  num_influentials  <- get_num_influentials(model.cook, final.threshold) 
+
+  # Return data after removing influential outliers (if any) as per desired threshold
+  final <- get_clean(model.cook, final.threshold, data.mod)
+  
+  if(num_influentials > 0) {
+
+    print_text('There were ', num_influentials, ' influential outliers')
+    # Update model after removing influential outliers
+    model.noout <- lm(formula(model), data = final) 
+    
+    print_header('Model summary after removing influential outliers')
+    print(summary(model.noout))
+    
+    print_header('Model diagnostics after removing influential points')
+    par(mfrow = c(2,2)) 
+    plot(model.noout)
+  }
+    
+  # Return clean data if needed
+  # final
+  
+}
+```
+
